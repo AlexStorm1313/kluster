@@ -32,7 +32,7 @@ single-node-ignition-config:
 	make _ignition
 	
 	$(TOOLING_DIR)/openshift-install --dir=$(OUTPUT_DIR) create single-node-ignition-config
-	mv $(OUTPUT_DIR)/bootstrap-in-place-for-live.ign bootstrap.ign
+	mv $(OUTPUT_DIR)/bootstrap-in-place-for-live-iso.ign $(OUTPUT_DIR)/bootstrap.ign
 
 # Create the ignition configs
 ignition-configs:
