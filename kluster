@@ -1,0 +1,169 @@
+#!/bin/bash
+
+set -e  # Exit on error
+
+# Source environment variables
+source .env
+
+# Directory structure
+INSTALL_DIR=./install
+TOOLING_DIR=./tooling/${OKD_VERSION}
+OVERLAY_DIR=./overlay
+
+source .env
+
+
+
+function test_dit(){
+    echo ${IMAGE_URL}
+}
+
+# Function to get OKD version specific tooling
+function get_tooling() {
+    mkdir -p "${TOOLING_DIR}"
+    
+    podman run --rm --privileged \
+        -v "./${TOOLING_DIR}:/data" \
+        -w /data \
+        quay.io/openshift/origin-cli:latest \
+        oc adm release extract --tools "registry.ci.openshift.org/origin/release:${OKD_VERSION}"
+    
+    rm "${TOOLING_DIR}"/*rhel*.tar.gz
+    
+    tar zxvf "${TOOLING_DIR}/openshift-install-linux-"*.tar.gz -C "${TOOLING_DIR}"
+    chmod +x "${TOOLING_DIR}/openshift-install"
+    tar zxvf "${TOOLING_DIR}/openshift-client-linux-"*.tar.gz -C "${TOOLING_DIR}"
+    chmod +x "${TOOLING_DIR}/oc"
+}
+
+# Function to create base ignition configuration
+function create_base_ignition() {
+    mkdir -p "${OUTPUT_DIR}"
+    cp "${INSTALL_DIR}/install-config.yaml" "${OUTPUT_DIR}"
+    "${TOOLING_DIR}/openshift-install" --dir="${OUTPUT_DIR}" create manifests
+    
+    # Process OpenShift Butane configs
+    for file in "${INSTALL_DIR}"/openshift/*.yaml; do
+        podman run --rm --privileged \
+            -v "${INSTALL_DIR}/openshift:/data" \
+            -v "${OUTPUT_DIR}/openshift:/openshift" \
+            -w /data \
+            quay.io/coreos/butane:release \
+            --pretty --strict "$(basename "$file")" \
+            -o "/openshift/$(basename "$file")"
+    done
+    
+    cp -r "${INSTALL_DIR}"/manifests/*.yaml "${OUTPUT_DIR}/manifests"
+}
+
+# Function to create single node ignition config
+function create_single_node_ignition() {
+    create_base_ignition
+    "${TOOLING_DIR}/openshift-install" --dir="${OUTPUT_DIR}" create single-node-ignition-config
+    mv "${OUTPUT_DIR}/bootstrap-in-place-for-live-iso.ign" "${OUTPUT_DIR}/bootstrap.ign"
+}
+
+# Function to create regular ignition configs
+function create_ignition_configs() {
+    create_base_ignition
+    "${TOOLING_DIR}/openshift-install" --dir="${OUTPUT_DIR}" create ignition-configs
+}
+
+# Function to create disk images
+function create_disk_image() {
+    local image_variant=$1
+    
+    touch "${OUTPUT_DIR}/${image_variant}.img"
+    truncate -s 16G "${OUTPUT_DIR}/${image_variant}.img"
+    
+    sudo losetup --detach "${DISK_DEVICE}" || true
+    sudo losetup -P "${DISK_DEVICE}" "${OUTPUT_DIR}/${image_variant}.img"
+    
+    sudo podman run --rm --privileged \
+        -v /dev:/dev \
+        -v /run/udev:/run/udev \
+        -v "./${OUTPUT_DIR}:/data" \
+        -w /data \
+        quay.io/coreos/coreos-installer:release \
+        install \
+        --image-url "${IMAGE_URL}" \
+        --ignition-file "./${image_variant}.ign" \
+        "${DISK_DEVICE}"
+    
+    sudo losetup --detach "${DISK_DEVICE}"
+}
+
+# Function to wait for bootstrap completion
+function wait_bootstrap_complete() {
+    "${TOOLING_DIR}/openshift-install" --dir="${OUTPUT_DIR}" wait-for bootstrap-complete
+}
+
+# Function to wait for install completion
+function wait_install_complete() {
+    "${TOOLING_DIR}/openshift-install" --dir="${OUTPUT_DIR}" wait-for install-complete
+}
+
+# Function to copy images to libvirt
+function copy_to_libvirt() {
+    sudo cp -r "${OUTPUT_DIR}"/*.img /var/lib/libvirt/images
+}
+
+# Function to create ignition overlay
+function create_ignition_overlay() {
+    for file in "${OVERLAY_DIR}"/*.yaml; do
+        podman run --rm --privileged \
+            -v "${OVERLAY_DIR}:/data/overlay" \
+            -v "${OUTPUT_DIR}:/data" \
+            -w /data \
+            quay.io/coreos/butane:release \
+            --pretty --strict --files-dir /data \
+            "./overlay/$(basename "$file")" \
+            -o "$(basename "$file" .yaml).ign"
+    done
+}
+
+# Main script with command line argument handling
+function main() {
+    case "$1" in
+        "tooling")
+            get_tooling
+            ;;
+        "single-node-ignition-config")
+            create_single_node_ignition
+            ;;
+        "ignition-configs")
+            create_ignition_configs
+            ;;
+        "bootstrap-image")
+            create_disk_image "bootstrap"
+            ;;
+        "master-image")
+            create_disk_image "master"
+            ;;
+        "worker-image")
+            create_disk_image "worker"
+            ;;
+        "bootstrap-complete")
+            wait_bootstrap_complete
+            ;;
+        "install-complete")
+            wait_install_complete
+            ;;
+        "copy-images-to-libvirt")
+            copy_to_libvirt
+            ;;
+        "ignition-overlay")
+            create_ignition_overlay
+            ;;
+        "test")
+            test_dit
+            ;;
+        *)
+            echo "Usage: $0 {tooling|single-node-ignition-config|ignition-configs|bootstrap-image|master-image|worker-image|bootstrap-complete|install-complete|copy-images-to-libvirt|ignition-overlay}"
+            exit 1
+            ;;
+    esac
+}
+
+# Execute main function with all script arguments
+main "$@"
