@@ -29,6 +29,9 @@ function get_image_url() {
 
 function get_image() {
     echo "Yet to be implemented, Download Image or ISO to be used, $(get_image_url)"
+    podman run --rm --privileged \
+        -v ./${OUTPUT_DIR}:/data -w /data \
+        quay.io/coreos/coreos-installer:release download --image-url $(get_image_url)
 }
 
 # Prepare output directory and allow for customization
