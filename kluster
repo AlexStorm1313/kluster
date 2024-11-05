@@ -1,6 +1,6 @@
 #!/bin/bash
 
-set -e  # Exit on error
+set -e # Exit on error
 
 # Source environment variables
 source .env
@@ -8,27 +8,37 @@ source .env
 # Function to get OKD version specific tooling
 function get_tooling() {
     mkdir -p ${TOOLING_DIR}
-    
+
     podman run --rm --privileged \
         -v ./${TOOLING_DIR}:/data \
         -w /data \
         quay.io/openshift/origin-cli:latest \
         oc adm release extract --tools registry.ci.openshift.org/origin/release:${OKD_VERSION}
-    
+
     rm ${TOOLING_DIR}/*rhel*.tar.gz
-    
+
     tar zxvf ${TOOLING_DIR}/openshift-install-linux-*.tar.gz -C ${TOOLING_DIR}
     chmod +x ${TOOLING_DIR}/openshift-install
     tar zxvf ${TOOLING_DIR}/openshift-client-linux-*.tar.gz -C ${TOOLING_DIR}
     chmod +x ${TOOLING_DIR}/oc
 }
 
-# Function to create base ignition configuration
-function create_base_ignition() {
+function get_image_url() {
+    echo $(${TOOLING_DIR}/openshift-install coreos print-stream-json | grep location | grep ${HOST}.${ARCH}.${IMAGE} | cut -d \" -f4)
+}
+
+function get_image() {
+    echo "Yet to be implemented, Download Image or ISO to be used, $(get_image_url)"
+}
+
+# Prepare output directory and allow for customization
+function create_manifests() {
+    rm -rf ${OUTPUT_DIR}
     mkdir -p ${OUTPUT_DIR}
     cp ${INSTALL_DIR}/install-config.yaml ${OUTPUT_DIR}
+
     ${TOOLING_DIR}/openshift-install --dir=${OUTPUT_DIR} create manifests
-    
+
     # Process OpenShift Butane configs
     for file in ${INSTALL_DIR}/openshift/*.yaml; do
         podman run --rm --privileged \
@@ -39,36 +49,54 @@ function create_base_ignition() {
             --pretty --strict $(basename $file) \
             -o /openshift/$(basename $file)
     done
-    
+
     cp -r ${INSTALL_DIR}/manifests/*.yaml ${OUTPUT_DIR}/manifests
 }
 
 # Function to create single node ignition config
-function create_single_node_ignition() {
-    create_base_ignition
+function create_single_node_ignition_config() {
+    create_manifests
+
     ${TOOLING_DIR}/openshift-install --dir=${OUTPUT_DIR} create single-node-ignition-config
+
     mv ${OUTPUT_DIR}/bootstrap-in-place-for-live-iso.ign ${OUTPUT_DIR}/bootstrap.ign
+
+    create_overlay
 }
 
 # Function to create regular ignition configs
 function create_ignition_configs() {
-    create_base_ignition
+    create_manifests
+
     ${TOOLING_DIR}/openshift-install --dir=${OUTPUT_DIR} create ignition-configs
+
+    create_overlay
+}
+
+# Function to create ignition overlay, this allows for modifying the produced ignition config by the openshift-installer
+function create_overlay() {
+    for file in ${OVERLAY_DIR}/*.yaml; do
+        podman run --rm --privileged \
+            -v ${OVERLAY_DIR}:/overlay \
+            -v ${OUTPUT_DIR}:/data \
+            -w / \
+            quay.io/coreos/butane:release \
+            --pretty --strict --files-dir /data \
+            ./overlay/$(basename $file) \
+            -o ./data/$(basename $file .yaml).ign
+    done
 }
 
 # Function to create disk images
 function create_disk_image() {
     local image_variant=$1
-    
-    # Get the image URL dynamically
-    local IMAGE_URL=$(get_image_url ${TOOLING_DIR})
-    
+
     touch ${OUTPUT_DIR}/${image_variant}.img
     truncate -s 16G ${OUTPUT_DIR}/${image_variant}.img
-    
+
     sudo losetup --detach ${DISK_DEVICE} || true
     sudo losetup -P ${DISK_DEVICE} ${OUTPUT_DIR}/${image_variant}.img
-    
+
     sudo podman run --rm --privileged \
         -v /dev:/dev \
         -v /run/udev:/run/udev \
@@ -76,21 +104,11 @@ function create_disk_image() {
         -w /data \
         quay.io/coreos/coreos-installer:release \
         install \
-        --image-url ${IMAGE_URL} \
+        --image-url $(get_image_url) \
         --ignition-file ./${image_variant}.ign \
         ${DISK_DEVICE}
-    
+
     sudo losetup --detach ${DISK_DEVICE}
-}
-
-# Function to wait for bootstrap completion
-function wait_bootstrap_complete() {
-    ${TOOLING_DIR}/openshift-install --dir=${OUTPUT_DIR} wait-for bootstrap-complete
-}
-
-# Function to wait for install completion
-function wait_install_complete() {
-    ${TOOLING_DIR}/openshift-install --dir=${OUTPUT_DIR} wait-for install-complete
 }
 
 # Function to copy images to libvirt
@@ -98,145 +116,155 @@ function copy_to_libvirt() {
     sudo cp -r ${OUTPUT_DIR}/*.img /var/lib/libvirt/images
 }
 
-# Function to create ignition overlay
-function create_ignition_overlay() {
-    for file in ${OVERLAY_DIR}/*.yaml; do
-        podman run --rm --privileged \
-            -v ${OVERLAY_DIR}:/data/overlay \
-            -v ${OUTPUT_DIR}:/data \
-            -w /data \
-            quay.io/coreos/butane:release \
-            --pretty --strict --files-dir /data \
-            ./overlay/$(basename $file) \
-            -o $(basename $file .yaml).ign
-    done
-}
-
+# Function to show help documentation
 function show_help() {
-    echo Usage: $0 COMMAND [SUBCOMMAND]
-    echo
-    echo Commands:
-    echo   get tooling                   Download and extract OKD tooling
-    echo   create ignition single-node   Create single node ignition configuration
-    echo   create ignition configs       Create regular ignition configurations
-    echo   create ignition overlay       Create custom ignition overlay
-    echo   create image bootstrap        Create bootstrap disk image
-    echo   create image master           Create master disk image
-    echo   create image worker          Create worker disk image
-    echo   wait complete bootstrap       Wait for bootstrap process to complete
-    echo   wait complete install         Wait for installation to complete
-    echo   copy images libvirt          Copy images to libvirt directory
-    echo
-    echo Examples:
-    echo   $0 get tooling
-    echo   $0 create image master
-    echo   $0 wait complete bootstrap
+    cat <<EOF
+    OKD Installation Helper Script
+    =============================
+
+    Usage: $0 COMMAND [SUBCOMMAND]
+
+    Commands:
+    ---------
+    get
+        tooling                       Download and extract OKD tooling for the specified version
+        image                         Download CoreOS image (currently unimplemented)
+
+    create
+        single-node-ignition-config   Generate ignition config for single-node deployment
+        ignition-configs              Generate ignition configs for multi-node deployment
+        overlay                       Create custom ignition overlay from Butane configs
+        manifests                     Generate and customize OKD manifests
+        image
+            bootstrap                 Create bootstrap node disk image
+            master                    Create master node disk image
+            worker                    Create worker node disk image
+
+    copy
+        images
+            libvirt                   Copy generated disk images to libvirt directory
+
+    help                              Show this help message
+
+    openshift-install                 Direct access to openshift-install command
+    oc                                Direct access to oc command
+
+    Examples:
+    --------
+    # Set up the environment:
+    $0 get tooling
+
+    # Create a single-node deployment:
+    $0 create single-node-ignition-config
+    $0 create image bootstrap
+
+    # Create a multi-node deployment:
+    $0 create ignition-configs
+    $0 create image bootstrap
+    $0 create image master
+    $0 create image worker
+
+    # Copy images to libvirt:
+    $0 copy images libvirt
+
+    Notes:
+    ------
+    - The script requires a valid .env file with configuration settings
+    - Root/sudo access is needed for disk image creation and libvirt operations
+    - Podman is required for running container-based tools
+    - All generated files will be placed in the configured output directory
+EOF
 }
 
 # Main script with command line argument handling
 function main() {
-    case "$1" in
-        "test")
-            test_dit
+    case $1 in
+    "help")
+        show_help
+        ;;
+        # Wrapper functions for OKD tools. This uses the correct context
+    "openshift-install")
+        ${TOOLING_DIR}/openshift-install --dir=${OUTPUT_DIR} ${@:2}
+        ;;
+    "oc")
+        ${TOOLING_DIR}/oc ${@:2}
+        ;;
+        # Download the tools needed for the specific version of OKD
+    "get")
+        case $2 in
+        "tooling")
+            get_tooling
             ;;
-        "get")
-            case "$2" in
-                "tooling")
-                    get_tooling
-                    ;;
-                *)
-                    show_help
-                    exit 1
-                    ;;
-            esac
+        "image")
+            get_image
             ;;
-        "create")
-            case "$2" in
-                "ignition")
-                    case "$3" in
-                        "single-node")
-                            create_single_node_ignition
-                            ;;
-                        "configs")
-                            create_ignition_configs
-                            ;;
-                        "overlay")
-                            create_ignition_overlay
-                            ;;
-                        *)
-                            show_help
-                            exit 1
-                            ;;
-                    esac
-                    ;;
-                "image")
-                    case "$3" in
-                        "bootstrap")
-                            create_disk_image "bootstrap"
-                            ;;
-                        "master")
-                            create_disk_image "master"
-                            ;;
-                        "worker")
-                            create_disk_image "worker"
-                            ;;
-                        *)
-                            show_help
-                            exit 1
-                            ;;
-                    esac
-                    ;;
-                *)
-                    show_help
-                    exit 1
-                    ;;
-            esac
+        *)
+            show_help
+            exit 1
             ;;
-        "wait")
-            case "$2" in
-                "complete")
-                    case "$3" in
-                        "bootstrap")
-                            wait_bootstrap_complete
-                            ;;
-                        "install")
-                            wait_install_complete
-                            ;;
-                        *)
-                            show_help
-                            exit 1
-                            ;;
-                    esac
-                    ;;
-                *)
-                    show_help
-                    exit 1
-                    ;;
-            esac
+        esac
+        ;;
+        # Create ignition files and Image/ISO
+    "create")
+        case $2 in
+        "single-node-ignition-config")
+            create_single_node_ignition_config
             ;;
-        "copy")
-            case "$2" in
-                "images")
-                    case "$3" in
-                        "libvirt")
-                            copy_to_libvirt
-                            ;;
-                        *)
-                            show_help
-                            exit 1
-                            ;;
-                    esac
-                    ;;
-                *)
-                    show_help
-                    exit 1
-                    ;;
+        "ignition-configs")
+            create_ignition_configs
+            ;;
+        "overlay")
+            create_overlay
+            ;;
+        "manifests")
+            create_manifests
+            ;;
+        "image")
+            case $3 in
+            "bootstrap")
+                create_disk_image "bootstrap"
+                ;;
+            "master")
+                create_disk_image "master"
+                ;;
+            "worker")
+                create_disk_image "worker"
+                ;;
+            *)
+                show_help
+                exit 1
+                ;;
             esac
             ;;
         *)
             show_help
             exit 1
             ;;
+        esac
+        ;;
+    "copy")
+        case $2 in
+        "images")
+            case $3 in
+            "libvirt")
+                copy_to_libvirt
+                ;;
+            *)
+                show_help
+                exit 1
+                ;;
+            esac
+            ;;
+        *)
+            show_help
+            exit 1
+            ;;
+        esac
+        ;;
+    *)
+        show_help
+        exit 1
+        ;;
     esac
 }
 
