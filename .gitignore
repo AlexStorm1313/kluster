@@ -1,5 +1,6 @@
 install
-tooling
 output
+overlay
+tooling
 
 .env
