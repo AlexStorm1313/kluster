@@ -3,7 +3,7 @@
 set -e  # Exit on error
 
 # Source environment variables
-source ./.env
+source .env
 
 # Function to get OKD version specific tooling
 function get_tooling() {
