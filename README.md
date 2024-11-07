@@ -12,6 +12,8 @@ The kluster script is a bash script that simplifies the process of installing an
 ```bash
 # Clone the repo to a location in your $PATH
 git clone git@github.com:AlexStorm1313/kluster.git ~/.local/bin/kluster 
+```
+```bash
 # Make the script executable
 chmod +x ~/.local/bin/kluster/kluster
 ```
