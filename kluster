@@ -69,8 +69,9 @@ function create_manifests() {
                 -o /openshift/$(basename $file)
         done
     fi
-
-    cp -r ${INSTALL_DIR}/manifests/*.yaml ${OUTPUT_DIR}/manifests
+    if [ -f ${INSTALL_DIR}/manifests/*.yaml ]; then
+        cp -r ${INSTALL_DIR}/manifests/*.yaml ${OUTPUT_DIR}/manifests
+    fi
 }
 
 # Function to create single node ignition config
