@@ -58,15 +58,17 @@ function create_manifests() {
     ${TOOLING_DIR}/openshift-install --dir=${OUTPUT_DIR} create manifests
 
     # Process OpenShift Butane configs
-    for file in ${INSTALL_DIR}/openshift/*.yaml; do
-        podman run --rm --privileged \
-            -v ${INSTALL_DIR}/openshift:/data \
-            -v ${OUTPUT_DIR}/openshift:/openshift \
-            -w /data \
-            quay.io/coreos/butane:release \
-            --pretty --strict $(basename $file) \
-            -o /openshift/$(basename $file)
-    done
+    if [ -f ${INSTALL_DIR}/openshift/*.yaml ]; then
+        for file in ${INSTALL_DIR}/openshift/*.yaml; do
+            podman run --rm --privileged \
+                -v ${INSTALL_DIR}/openshift:/data \
+                -v ${OUTPUT_DIR}/openshift:/openshift \
+                -w /data \
+                quay.io/coreos/butane:release \
+                --pretty --strict $(basename $file) \
+                -o /openshift/$(basename $file)
+        done
+    fi
 
     cp -r ${INSTALL_DIR}/manifests/*.yaml ${OUTPUT_DIR}/manifests
 }
@@ -93,16 +95,18 @@ function create_ignition_configs() {
 
 # Function to create ignition overlay, this allows for modifying the produced ignition config by the openshift-installer
 function create_overlay() {
-    for file in ${OVERLAY_DIR}/*.yaml; do
-        podman run --rm --privileged \
-            -v ${OVERLAY_DIR}:/overlay \
-            -v ${OUTPUT_DIR}:/data \
-            -w / \
-            quay.io/coreos/butane:release \
-            --pretty --strict --files-dir /data \
-            ./overlay/$(basename $file) \
-            -o ./data/$(basename $file .yaml).ign
-    done
+    if [ -f ${OVERLAY_DIR}/*.yaml ]; then
+        for file in ${OVERLAY_DIR}/*.yaml; do
+            podman run --rm --privileged \
+                -v ${OVERLAY_DIR}:/overlay \
+                -v ${OUTPUT_DIR}:/data \
+                -w / \
+                quay.io/coreos/butane:release \
+                --pretty --strict --files-dir /data \
+                ./overlay/$(basename $file) \
+                -o ./data/$(basename $file .yaml).ign
+        done
+    fi
 }
 
 # Function to create disk images
