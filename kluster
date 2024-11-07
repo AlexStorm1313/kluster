@@ -4,6 +4,7 @@ INSTALL_DIR=./install
 OUTPUT_DIR=./output/${OKD_VERSION}
 OVERLAY_DIR=./overlay
 TOOLING_DIR=./tooling/${OKD_VERSION}
+RELEASE=release
 
 # Source environment variables
 source .env
@@ -28,7 +29,7 @@ function get_tooling() {
         -v ./${TOOLING_DIR}:/data \
         -w /data \
         quay.io/openshift/origin-cli:latest \
-        oc adm release extract --tools registry.ci.openshift.org/origin/release:${OKD_VERSION}
+        oc adm release extract --tools registry.ci.openshift.org/origin/${RELEASE}:${OKD_VERSION}
 
     rm ${TOOLING_DIR}/*rhel*.tar.gz
 
