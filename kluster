@@ -1,9 +1,27 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 set -e # Exit on error
 
+INSTALL_DIR=./install
+OUTPUT_DIR=./output/${OKD_VERSION}
+OVERLAY_DIR=./overlay
+TOOLING_DIR=./tooling/${OKD_VERSION}
+
 # Source environment variables
 source .env
+
+function init_directory() {
+    touch .env
+    mkdir -p ${INSTALL_DIR}
+    mkdir -p ${INSTALL_DIR}/manifests
+    mkdir -p ${INSTALL_DIR}/openshift
+    touch ${INSTALL_DIR}/install-config.yaml
+
+    mkdir -p ${OVERLAY_DIR}
+    touch ${OVERLAY_DIR}/bootstrap.yaml
+    touch ${OVERLAY_DIR}/master.yaml
+    touch ${OVERLAY_DIR}/worker.yaml
+}
 
 # Function to get OKD version specific tooling
 function get_tooling() {
@@ -121,14 +139,17 @@ function copy_to_libvirt() {
 
 # Function to show help documentation
 function show_help() {
+    echo $INSTALL_DIR
+    echo $OUTPUT_DIR
     cat <<EOF
-    OKD Installation Helper Script
+    kluster - OKD install script
     =============================
 
     Usage: $0 COMMAND [SUBCOMMAND]
 
     Commands:
     ---------
+    init                              Initialize the current directory as the configuration directory
     get
         tooling                       Download and extract OKD tooling for the specified version
         image                         Download CoreOS image (currently unimplemented)
@@ -179,11 +200,69 @@ function show_help() {
 EOF
 }
 
+function completion() {
+    local cur prev opts
+    COMPREPLY=()
+    cur="${COMP_WORDS[COMP_CWORD]}"
+    prev="${COMP_WORDS[COMP_CWORD - 1]}"
+
+    opts="get create copy help openshift-install oc"
+
+    if [[ ${cur} == -* ]]; then
+        COMPREPLY=($(compgen -W "${opts}" -- ${cur}))
+        return 0
+    fi
+
+    case "${prev}" in
+    get)
+        COMPREPLY=($(compgen -W "tooling image" -- ${cur}))
+        ;;
+    create)
+        COMPREPLY=($(compgen -W "single-node-ignition-config ignition-configs overlay manifests image" -- ${cur}))
+        ;;
+    create)
+        if [[ ${COMP_WORDS[COMP_CWORD - 2]} == "image" ]]; then
+            COMPREPLY=($(compgen -W "bootstrap master worker" -- ${cur}))
+        fi
+        ;;
+    copy)
+        COMPREPLY=($(compgen -W "images" -- ${cur}))
+        ;;
+    copy)
+        if [[ ${COMP_WORDS[COMP_CWORD - 2]} == "images" ]]; then
+            COMPREPLY=($(compgen -W "libvirt" -- ${cur}))
+        fi
+        ;;
+    *)
+        COMPREPLY=()
+        ;;
+    esac
+
+    return 0
+}
+
 # Main script with command line argument handling
 function main() {
     case $1 in
     "help")
         show_help
+        ;;
+    "init")
+        init_directory
+        ;;
+    "completion")
+        case $2 in
+        "enable")
+            complete -F completion ./kluster
+            ;;
+        "disable")
+            complete -r ./kluster
+            ;;
+        *)
+            show_help
+            exit 1
+            ;;
+        esac
         ;;
         # Wrapper functions for OKD tools. This uses the correct context
     "openshift-install")
