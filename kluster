@@ -1,7 +1,5 @@
 #!/usr/bin/env bash
 
-set -e # Exit on error
-
 INSTALL_DIR=./install
 OUTPUT_DIR=./output/${OKD_VERSION}
 OVERLAY_DIR=./overlay
@@ -9,6 +7,8 @@ TOOLING_DIR=./tooling/${OKD_VERSION}
 
 # Source environment variables
 source .env
+
+set -e # Exit on error
 
 function init_directory() {
     touch .env
@@ -18,9 +18,6 @@ function init_directory() {
     touch ${INSTALL_DIR}/install-config.yaml
 
     mkdir -p ${OVERLAY_DIR}
-    touch ${OVERLAY_DIR}/bootstrap.yaml
-    touch ${OVERLAY_DIR}/master.yaml
-    touch ${OVERLAY_DIR}/worker.yaml
 }
 
 # Function to get OKD version specific tooling
@@ -139,8 +136,6 @@ function copy_to_libvirt() {
 
 # Function to show help documentation
 function show_help() {
-    echo $INSTALL_DIR
-    echo $OUTPUT_DIR
     cat <<EOF
     kluster - OKD install script
     =============================
