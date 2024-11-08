@@ -143,14 +143,15 @@ function copy_to_libvirt() {
 # Function to show help documentation
 function show_help() {
     cat <<EOF
-    kluster - OKD install script
-    =============================
-
     Usage: $0 COMMAND [SUBCOMMAND]
 
     Commands:
     ---------
+    help                              Show this help message
+    completion                        Bash completion
+
     init                              Initialize the current directory as the configuration directory
+
     get
         tooling                       Download and extract OKD tooling for the specified version
         image                         Download CoreOS image (currently unimplemented)
@@ -165,51 +166,24 @@ function show_help() {
             master                    Create master node disk image
             worker                    Create worker node disk image
 
-    copy
-        images
-            libvirt                   Copy generated disk images to libvirt directory
-
-    help                              Show this help message
-
     openshift-install                 Direct access to openshift-install command
     oc                                Direct access to oc command
-
-    Examples:
-    --------
-    # Set up the environment:
-    $0 get tooling
-
-    # Create a single-node deployment:
-    $0 create single-node-ignition-config
-    $0 create image bootstrap
-
-    # Create a multi-node deployment:
-    $0 create ignition-configs
-    $0 create image bootstrap
-    $0 create image master
-    $0 create image worker
-
-    # Copy images to libvirt:
-    $0 copy images libvirt
-
-    Notes:
-    ------
-    - The script requires a valid .env file with configuration settings
-    - Root/sudo access is needed for disk image creation and libvirt operations
-    - Podman is required for running container-based tools
-    - All generated files will be placed in the configured output directory
 EOF
 }
 
 function completion() {
+    cat <<"EOF"
+#!/usr/bin/env bash
+
+_kluster() {
     local cur prev opts
     COMPREPLY=()
     cur="${COMP_WORDS[COMP_CWORD]}"
     prev="${COMP_WORDS[COMP_CWORD - 1]}"
 
-    opts="get create copy help openshift-install oc"
+    opts="help completion init get create copy openshift-install konker"
 
-    if [[ ${cur} == -* ]]; then
+    if [[ ${COMP_CWORD} -eq 1 ]]; then
         COMPREPLY=($(compgen -W "${opts}" -- ${cur}))
         return 0
     fi
@@ -234,6 +208,12 @@ function completion() {
             COMPREPLY=($(compgen -W "libvirt" -- ${cur}))
         fi
         ;;
+    openshift-install)
+        __start_openshift-install
+        ;;
+    konker)
+        __start_oc
+        ;;
     *)
         COMPREPLY=()
         ;;
@@ -242,28 +222,23 @@ function completion() {
     return 0
 }
 
+complete -F _kluster kluster
+EOF
+}
+
 # Main script with command line argument handling
 function main() {
     case $1 in
     "help")
         show_help
         ;;
+    "completion")
+        completion
+        ${TOOLING_DIR}/openshift-install completion bash
+        ${TOOLING_DIR}/oc completion bash
+        ;;
     "init")
         init_directory
-        ;;
-    "completion")
-        case $2 in
-        "enable")
-            complete -F completion ./kluster
-            ;;
-        "disable")
-            complete -r ./kluster
-            ;;
-        *)
-            show_help
-            exit 1
-            ;;
-        esac
         ;;
         # Wrapper functions for OKD tools. This uses the correct context
     "openshift-install")
