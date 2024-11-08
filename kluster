@@ -211,7 +211,7 @@ _kluster() {
     openshift-install)
         __start_openshift-install
         ;;
-    konker)
+    oc)
         __start_oc
         ;;
     *)
