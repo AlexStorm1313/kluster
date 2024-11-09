@@ -173,56 +173,60 @@ EOF
 
 function completion() {
     cat <<"EOF"
-#!/usr/bin/env bash
+    #!/usr/bin/env bash
 
-_kluster() {
-    local cur prev opts
-    COMPREPLY=()
-    cur="${COMP_WORDS[COMP_CWORD]}"
-    prev="${COMP_WORDS[COMP_CWORD - 1]}"
-
-    opts="help completion init get create copy openshift-install oc"
-
-    if [[ ${COMP_CWORD} -eq 1 ]]; then
-        COMPREPLY=($(compgen -W "${opts}" -- ${cur}))
-        return 0
-    fi
-
-    case "${prev}" in
-    get)
-        COMPREPLY=($(compgen -W "tooling image" -- ${cur}))
-        ;;
-    create)
-        COMPREPLY=($(compgen -W "single-node-ignition-config ignition-configs overlay manifests image" -- ${cur}))
-        ;;
-    create)
-        if [[ ${COMP_WORDS[COMP_CWORD - 2]} == "image" ]]; then
-            COMPREPLY=($(compgen -W "bootstrap master worker" -- ${cur}))
-        fi
-        ;;
-    copy)
-        COMPREPLY=($(compgen -W "images" -- ${cur}))
-        ;;
-    copy)
-        if [[ ${COMP_WORDS[COMP_CWORD - 2]} == "images" ]]; then
-            COMPREPLY=($(compgen -W "libvirt" -- ${cur}))
-        fi
-        ;;
-    openshift-install)
-        __start_openshift-install
-        ;;
-    oc)
-        __start_oc
-        ;;
-    *)
+    _kluster() {
+        local cur prev opts
         COMPREPLY=()
-        ;;
-    esac
+        cur="${COMP_WORDS[COMP_CWORD]}"
+        prev="${COMP_WORDS[COMP_CWORD - 1]}"
 
-    return 0
-}
+        opts="help completion init get create copy openshift-install oc"
 
-complete -F _kluster kluster
+        if [[ ${COMP_CWORD} -eq 1 ]]; then
+            COMPREPLY=($(compgen -W "${opts}" -- ${cur}))
+            return 0
+        fi
+
+        case "${prev}" in
+        get)
+            COMPREPLY=($(compgen -W "tooling image" -- ${cur}))
+            ;;
+        create)
+            COMPREPLY=($(compgen -W "single-node-ignition-config ignition-configs overlay manifests image" -- ${cur}))
+            ;;
+        create)
+            if [[ ${COMP_WORDS[COMP_CWORD - 2]} == "image" ]]; then
+                COMPREPLY=($(compgen -W "bootstrap master worker" -- ${cur}))
+            fi
+            ;;
+        copy)
+            COMPREPLY=($(compgen -W "images" -- ${cur}))
+            ;;
+        copy)
+            if [[ ${COMP_WORDS[COMP_CWORD - 2]} == "images" ]]; then
+                COMPREPLY=($(compgen -W "libvirt" -- ${cur}))
+            fi
+            ;;
+        openshift-install)
+            _command_offset 1
+            ;;
+        oc)
+            _command_offset 1
+            ;;
+        *)
+            COMPREPLY=()
+            ;;
+        esac
+
+        return 0
+    }
+
+    if [[ $(type -t compopt) = "builtin" ]]; then
+        complete -o default -F  _kluster kluster
+    else
+        complete -o default -o nospace -F  _kluster kluster
+    fi
 EOF
 }
 
@@ -233,21 +237,19 @@ function main() {
         show_help
         ;;
     "completion")
-        completion
-        ${TOOLING_DIR}/openshift-install completion bash
         ${TOOLING_DIR}/oc completion bash
+        ${TOOLING_DIR}/openshift-install completion bash
+        completion
         ;;
     "init")
         init_directory
         ;;
-        # Wrapper functions for OKD tools. This uses the correct context
     "openshift-install")
         ${TOOLING_DIR}/openshift-install --dir=${OUTPUT_DIR} ${@:2}
         ;;
     "oc")
         ${TOOLING_DIR}/oc ${@:2}
         ;;
-        # Download the tools needed for the specific version of OKD
     "get")
         case $2 in
         "tooling")
